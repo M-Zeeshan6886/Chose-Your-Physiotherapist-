@@ -1,0 +1,72 @@
+# Choose Your Dr: database (PostgreSQL) + Adminer + web app (Next.js website and API)
+#
+#   Start:        docker compose up -d --build
+#   Website/API:  http://localhost:3000   (health check: /api/health)
+#   Browse DB:    http://localhost:8080   (System: PostgreSQL, Server: db,
+#                                          User/Password/Database: see below)
+#   Stop:         docker compose down
+#   FULL RESET (deletes all data, re-loads db/init/*.sql):
+#                 docker compose down -v && docker compose up -d
+#
+# Every .sql file in ./db/init (01 schema, 02 api functions, 03 DEMO data) runs automatically, in name order,
+# the FIRST time the database volume is created. If you already started an older version: docker compose down -v Future changes go in new files such as
+# db/init/02_phase2.sql (or use a migration tool once the backend exists).
+
+name: choose-your-dr
+
+services:
+  db:
+    image: postgres:16
+    container_name: juudo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-juudo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-juudo_dev_password}
+      POSTGRES_DB: ${DB_NAME:-juudo}
+    ports:
+      - "5432:5432"
+    volumes:
+      - juudo_pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-juudo} -d ${DB_NAME:-juudo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer
+    container_name: juudo-adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  web:
+    build: ./web
+    container_name: juudo-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${DB_USER:-juudo}:${DB_PASSWORD:-juudo_dev_password}@db:5432/${DB_NAME:-juudo}
+      APP_NAME: ${APP_NAME:-Choose Your Dr}
+      APP_ENV: ${APP_ENV:-local}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-change-me-please-123456}
+      CONTACT_DAILY_LIMIT: ${CONTACT_DAILY_LIMIT:-5}
+      OTP_REQUIRED_FROM_CONTACT: ${OTP_REQUIRED_FROM_CONTACT:-3}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+volumes:
+  juudo_pgdata:
+
